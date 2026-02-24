@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Open Live Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+  <style>
+    body { margin: 0; font-family: Arial; background: #111; color: white; }
+    #map { height: 100vh; }
+    .title {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(0,0,0,0.7);
+      padding: 8px 15px;
+      border-radius: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="title">🌍 Open Public Live Location Map</div>
+<div id="map"></div>
+
+<script>
+  // 🔥 PASTE YOUR FIREBASE CONFIG HERE
+  const firebaseConfig = {
+    apiKey: "YOUR_KEY",
+    authDomain: "YOUR_DOMAIN",
+    databaseURL: "YOUR_DB_URL",
+    projectId: "YOUR_PROJECT_ID",
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // Generate random ID for visitor
+  const userId = "user_" + Math.random().toString(36).substring(2,9);
+
+  // Initialize Map
+  const map = L.map('map').setView([20, 78], 4);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+
+  let markers = {};
+  let watchId;
+
+  // Ask for location
+  if (navigator.geolocation) {
+    watchId = navigator.geolocation.watchPosition(position => {
+      const { latitude, longitude } = position.coords;
+
+      // Update own location in DB
+      db.ref("locations/" + userId).set({
+        lat: latitude,
+        lng: longitude,
+        updated: Date.now()
+      });
+
+      map.setView([latitude, longitude], 13);
+    });
+  } else {
+    alert("Geolocation not supported");
+  }
+
+  // Listen for all users
+  db.ref("locations").on("value", snapshot => {
+    const users = snapshot.val();
+    if (!users) return;
+
+    Object.keys(users).forEach(id => {
+      const { lat, lng } = users[id];
+
+      if (markers[id]) {
+        markers[id].setLatLng([lat, lng]);
+      } else {
+        markers[id] = L.marker([lat, lng])
+          .addTo(map)
+          .bindPopup(id);
+      }
+    });
+  });
+
+  // Remove user on exit
+  window.addEventListener("beforeunload", () => {
+    db.ref("locations/" + userId).remove();
+  });
+</script>
+
+</body>
+</html>
