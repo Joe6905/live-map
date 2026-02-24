@@ -1,85 +1,175 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>My Exact Location</title>
+  <title>Public Live Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- Leaflet CSS -->
+  <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 
   <style>
-    body {
-      margin: 0;
-      font-family: Arial;
-      background: #111;
-      color: white;
+    body { margin:0; font-family: Arial; background:#111; color:white; }
+    #map { height:100vh; display:none; }
+
+    .login-box {
+      position:absolute;
+      top:50%;
+      left:50%;
+      transform:translate(-50%,-50%);
+      background:#222;
+      padding:20px;
+      border-radius:10px;
+      text-align:center;
     }
 
-    #map {
-      height: 100vh;
+    input, button {
+      padding:8px;
+      margin:5px;
+      border:none;
+      border-radius:5px;
     }
 
-    .status {
-      position: absolute;
-      top: 15px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.7);
-      padding: 8px 15px;
-      border-radius: 20px;
-      z-index: 1000;
+    button {
+      cursor:pointer;
+      background:green;
+      color:white;
+    }
+
+    .top-panel {
+      position:absolute;
+      top:10px;
+      left:50%;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,0.7);
+      padding:8px 15px;
+      border-radius:20px;
+      z-index:1000;
+      display:none;
+    }
+
+    .user-list {
+      position:absolute;
+      right:10px;
+      top:60px;
+      background:rgba(0,0,0,0.8);
+      padding:10px;
+      border-radius:10px;
+      max-height:300px;
+      overflow:auto;
+      z-index:1000;
+      display:none;
     }
   </style>
 </head>
 <body>
 
-<div class="status">Requesting location...</div>
+<div class="login-box" id="loginBox">
+  <h2>Enter Name to Join 🌍</h2>
+  <input type="text" id="username" placeholder="Your name">
+  <br>
+  <button onclick="start()">Continue</button>
+</div>
+
+<div class="top-panel" id="topPanel">
+  Active Users: <span id="userCount">0</span>
+</div>
+
+<div class="user-list" id="userList"></div>
 <div id="map"></div>
 
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
 <script>
-  const statusDiv = document.querySelector(".status");
+  // 🔥 PASTE YOUR FIREBASE CONFIG
+  const firebaseConfig = {
+    apiKey: "YOUR_KEY",
+    authDomain: "YOUR_DOMAIN",
+    databaseURL: "YOUR_DB_URL",
+    projectId: "YOUR_PROJECT_ID",
+  };
 
-  // Initialize map with default world view
-  const map = L.map('map').setView([20, 78], 3);
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
 
-  // OpenStreetMap tiles
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap'
-  }).addTo(map);
+  let map;
+  let userId;
+  let userName;
+  let markers = {};
+  let watchId;
 
-  if (navigator.geolocation) {
+  const emojis = ["😎","🔥","🚀","🎯","👑","🧠","🐱","🐼","🦊","🐸"];
 
-    navigator.geolocation.getCurrentPosition(
-      position => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+  function start() {
+    userName = document.getElementById("username").value.trim();
+    if (!userName) return alert("Enter name");
 
-        statusDiv.innerText = "Location found ✔";
+    userId = "user_" + Math.random().toString(36).substring(2,9);
+    const avatar = emojis[Math.floor(Math.random() * emojis.length)];
 
-        // Zoom to exact location
-        map.setView([lat, lng], 16);
+    document.getElementById("loginBox").style.display = "none";
+    document.getElementById("map").style.display = "block";
+    document.getElementById("topPanel").style.display = "block";
+    document.getElementById("userList").style.display = "block";
 
-        // Add marker
-        L.marker([lat, lng])
-          .addTo(map)
-          .bindPopup("You are here 📍")
-          .openPopup();
-      },
+    map = L.map('map').setView([20, 78], 4);
 
-      error => {
-        statusDiv.innerText = "Location access denied ❌";
-      },
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
 
-      {
-        enableHighAccuracy: true
-      }
-    );
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(position => {
+        const { latitude, longitude } = position.coords;
 
-  } else {
-    statusDiv.innerText = "Geolocation not supported";
+        db.ref("locations/" + userId).set({
+          name: userName,
+          avatar: avatar,
+          lat: latitude,
+          lng: longitude,
+          updated: Date.now()
+        });
+
+        map.setView([latitude, longitude], 13);
+      }, null, { enableHighAccuracy:true });
+    }
+
+    // Listen for all users
+    db.ref("locations").on("value", snapshot => {
+      const users = snapshot.val();
+      if (!users) return;
+
+      const userListDiv = document.getElementById("userList");
+      userListDiv.innerHTML = "";
+      document.getElementById("userCount").innerText = Object.keys(users).length;
+
+      Object.keys(users).forEach(id => {
+        const u = users[id];
+
+        // Update sidebar list
+        userListDiv.innerHTML += `<div>${u.avatar} ${u.name}</div>`;
+
+        // Custom icon
+        const icon = L.divIcon({
+          html: `<div style="font-size:24px">${u.avatar}</div>`,
+          className: ""
+        });
+
+        if (markers[id]) {
+          markers[id].setLatLng([u.lat, u.lng]);
+        } else {
+          markers[id] = L.marker([u.lat, u.lng], { icon })
+            .addTo(map)
+            .bindPopup(`${u.avatar} ${u.name}`);
+        }
+      });
+    });
+
+    window.addEventListener("beforeunload", () => {
+      db.ref("locations/" + userId).remove();
+    });
   }
 </script>
 
